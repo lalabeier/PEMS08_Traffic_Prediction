@@ -37,51 +37,68 @@ def prepare_data(data_dir='../data/PEMS08_raw/', seq_len=12, pred_len=1):
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
     return train_loader, test_loader, X_train.shape[2]  # num_nodes
 
-def train_one_epoch(model, loader, optimizer, criterion, device, L, focus_on_flow=True):
+def train_one_epoch(model, loader, optimizer, criterion, device, L, focus_on_flow=True, scaler=None):
     """训练一个epoch
     Args:
         focus_on_flow: 如果为True，只对流量特征（通道0）计算损失
+        scaler: 混合精度缩放器，如果为None则不使用混合精度
     """
     model.train()
     total_loss = 0
     for X_batch, y_batch in loader:
         X_batch, y_batch = X_batch.to(device), y_batch.to(device)
         optimizer.zero_grad()
-        output = model(X_batch, L)
         
-        if focus_on_flow:
-            # 只对流量特征（第一个通道）计算损失
-            loss = criterion(output[:, 0:1, :, :], y_batch[:, 0:1, :, :])
+        # 混合精度前向传播
+        if scaler is not None:
+            with torch.cuda.amp.autocast():
+                output = model(X_batch, L)
+                if focus_on_flow:
+                    loss = criterion(output[:, 0:1, :, :], y_batch[:, 0:1, :, :])
+                else:
+                    loss = criterion(output, y_batch)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
         else:
-            # 对所有特征计算损失
-            loss = criterion(output, y_batch)
+            output = model(X_batch, L)
+            if focus_on_flow:
+                loss = criterion(output[:, 0:1, :, :], y_batch[:, 0:1, :, :])
+            else:
+                loss = criterion(output, y_batch)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
         
-        loss.backward()
-        # 梯度裁剪，防止梯度爆炸（可能是Epoch 39异常的原因）
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
         total_loss += loss.item() * X_batch.size(0)
     return total_loss / len(loader.dataset)
 
-def evaluate(model, loader, criterion, device, L, focus_on_flow=True):
+def evaluate(model, loader, criterion, device, L, focus_on_flow=True, scaler=None):
     """评估模型
     Args:
         focus_on_flow: 如果为True，只对流量特征（通道0）计算损失
+        scaler: 如果提供，则在混合精度上下文内执行前向传播（用于评估时保持精度一致）
     """
     model.eval()
     total_loss = 0
     with torch.no_grad():
         for X_batch, y_batch in loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-            output = model(X_batch, L)
-            
-            if focus_on_flow:
-                # 只对流量特征（第一个通道）计算损失
-                loss = criterion(output[:, 0:1, :, :], y_batch[:, 0:1, :, :])
+            if scaler is not None:
+                with torch.cuda.amp.autocast():
+                    output = model(X_batch, L)
+                    if focus_on_flow:
+                        loss = criterion(output[:, 0:1, :, :], y_batch[:, 0:1, :, :])
+                    else:
+                        loss = criterion(output, y_batch)
             else:
-                # 对所有特征计算损失
-                loss = criterion(output, y_batch)
-            
+                output = model(X_batch, L)
+                if focus_on_flow:
+                    loss = criterion(output[:, 0:1, :, :], y_batch[:, 0:1, :, :])
+                else:
+                    loss = criterion(output, y_batch)
             total_loss += loss.item() * X_batch.size(0)
     return total_loss / len(loader.dataset)
 

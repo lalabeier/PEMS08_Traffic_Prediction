@@ -36,3 +36,18 @@ LOG_LEVEL = 'INFO'
 # 实验配置
 SEED = 42
 USE_GPU = True
+
+# 邻接矩阵配置
+ADJ_METHOD = 'corr'  # 'corr' 或 'file'
+ADJ_PATH = None
+ADJ_TOPK = 10
+ADJ_THRESHOLD = 0.1
+
+# 数据清洗配置
+HANDLE_MISSING = True
+HANDLE_OUTLIERS = True
+SMOOTH_LOW_FLOW = True
+OUTLIER_METHOD = 'cap'  # 'cap', 'smooth', 'remove'
+
+# 模型路径配置
+MODEL_PATH = './results/models/stgcn_model.pth'

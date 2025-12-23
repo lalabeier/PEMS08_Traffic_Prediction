@@ -58,6 +58,10 @@ python main.py --mode all
 ```
 
 #### 分步运行
+**启动环境**
+   ```bash
+   D:/apps/env_py/pytorch_env/Scripts/Activate.ps1
+   ```
 
 1. **预处理**：
    ```bash
@@ -67,14 +71,11 @@ python main.py --mode all
 
 2. **训练模型**：
    ```bash
-     python main.py --mode train --epochs 50 --batch_size 32 \
-    --adj_method corr --adj_topk 10 --adj_threshold 0.1
    python main.py --mode train --epochs 50 --batch_size 32
 
-   默认（相关性构图）：无需额外文件  python main.py --mode train --epochs 50 --batch_size 32 --adj_method corr --adj_topk 10 --adj_threshold 0.1
+   默认（相关性构图）：无需额外文件  python main.py --mode train --epochs 50 --batch_size 32 --adj_method corr  --adj_topk 10 --adj_threshold 0.1
 
-   使用外部邻接矩阵（npy/csv）:  python main.py --mode train --epochs 50 --batch_size 32 
-    --adj_method file --adj_path ./data/PEMS08_raw/adjacency.npy
+   使用外部邻接矩阵（npy/csv）:  python main.py --mode train --epochs 50 --batch_size 32 --adj_method file --adj_path ./data/PEMS08_raw/adjacency.npy
    ```
 
 3. **评估模型**：

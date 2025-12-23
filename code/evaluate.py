@@ -16,9 +16,9 @@ from model import STGCN, get_laplacian
 from preprocess import load_raw_data, split_train_test, normalize, create_sequences
 from utils import build_corr_adjacency, load_adjacency_from_file
 
-def load_model(model_path, num_nodes, device='cpu'):
+def load_model(model_path, num_nodes, device='cpu', in_channels=3, out_channels=3):
     """加载训练好的模型"""
-    model = STGCN(num_nodes, in_channels=3, hidden_channels=64, out_channels=3)
+    model = STGCN(num_nodes, in_channels=in_channels, hidden_channels=64, out_channels=out_channels)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval()
@@ -51,7 +51,7 @@ def compute_prediction_error(y_true, y_pred):
 def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/models/stgcn_model.pth',
                      adj_method='corr', adj_path=None, adj_topk=10, adj_threshold=0.1,
                      handle_missing=True, handle_outliers_flag=True, smooth_low_flow_flag=True,
-                     outlier_method='cap'):
+                     outlier_method='cap', add_time_features=True, time_features_for_input_only=True):
     """在测试集上评估模型"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     seq_len = 12
@@ -79,8 +79,15 @@ def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/mode
     train_data, test_data = split_train_test(data)
     train_norm, mean, std = normalize(train_data)
     test_norm, _, _ = normalize(test_data, mean, std)
-    X_test, y_test = create_sequences(test_norm, seq_len, pred_len)
+    X_test, y_test = create_sequences(test_norm, seq_len, pred_len,
+                                      add_time_features_flag=add_time_features,
+                                      time_features_for_input_only=time_features_for_input_only)
 
+    # 确定输入输出通道数
+    in_channels = X_test.shape[3]  # 特征维度
+    out_channels = y_test.shape[3]
+    print(f"输入通道数: {in_channels}, 输出通道数: {out_channels}")
+    
     # 转换为torch张量
     X_test = torch.FloatTensor(X_test).permute(0, 3, 1, 2)  # (samples, features, nodes, seq_len)
     y_test = torch.FloatTensor(y_test).permute(0, 3, 1, 2)
@@ -97,7 +104,7 @@ def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/mode
     L = get_laplacian(adj).to(device)
 
     # 加载模型
-    model = load_model(model_path, num_nodes, device)
+    model = load_model(model_path, num_nodes, device, in_channels=in_channels, out_channels=out_channels)
 
     # 预测
     predictions = []
@@ -111,10 +118,15 @@ def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/mode
 
     # 反标准化（mean和std的形状是(1, 1, features)，需要reshape为(1, features, 1, 1)以匹配(samples, features, nodes, timesteps)）
     # mean和std的最后一个维度是features维度，需要将其reshape到第二个维度
-    mean_reshaped = mean.squeeze()  # (3,) -> 去掉前两个维度
-    std_reshaped = std.squeeze()    # (3,)
-    mean_tensor = torch.FloatTensor(mean_reshaped).reshape(1, -1, 1, 1)  # (1, 3, 1, 1)
-    std_tensor = torch.FloatTensor(std_reshaped).reshape(1, -1, 1, 1)    # (1, 3, 1, 1)
+    mean_reshaped = mean.squeeze()  # (features,) -> 去掉前两个维度
+    std_reshaped = std.squeeze()    # (features,)
+    # 确保特征数匹配输出通道数
+    if mean_reshaped.shape[0] != out_channels:
+        # 如果特征数不匹配，可能时间特征被添加到了输入但未包含在输出中，我们只取前out_channels个特征
+        mean_reshaped = mean_reshaped[:out_channels]
+        std_reshaped = std_reshaped[:out_channels]
+    mean_tensor = torch.FloatTensor(mean_reshaped).reshape(1, -1, 1, 1)  # (1, out_channels, 1, 1)
+    std_tensor = torch.FloatTensor(std_reshaped).reshape(1, -1, 1, 1)    # (1, out_channels, 1, 1)
     y_true_orig = y_test * std_tensor + mean_tensor
     y_pred_orig = y_pred * std_tensor + mean_tensor
 
@@ -138,6 +150,18 @@ def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/mode
         mape = np.mean(np.abs(error_valid)) * 100
         print(f"MAPE (Mean Absolute Percentage Error): {mape:.2f}%")
         
+        # 计算RMSE（均方根误差）
+        rmse = np.sqrt(np.mean((y_true_flow[mask_valid] - y_pred_flow[mask_valid]) ** 2))
+        print(f"RMSE (Root Mean Square Error): {rmse:.4f}")
+        
+        # 计算R²（决定系数）
+        y_true_valid = y_true_flow[mask_valid]
+        y_pred_valid = y_pred_flow[mask_valid]
+        ss_res = np.sum((y_true_valid - y_pred_valid) ** 2)
+        ss_tot = np.sum((y_true_valid - np.mean(y_true_valid)) ** 2)
+        r2 = 1 - ss_res / ss_tot if ss_tot != 0 else np.nan
+        print(f"R^2 (Coefficient of Determination): {r2:.4f}")
+        
         # 对于真实值很小的样本，计算绝对误差
         if np.any(~mask_valid):
             mae_small = np.mean(np.abs(y_true_flow[~mask_valid] - y_pred_flow[~mask_valid]))
@@ -146,6 +170,13 @@ def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/mode
         # 如果所有真实值都很小，使用绝对误差
         mean_error = np.mean(np.abs(y_true_flow - y_pred_flow))
         print(f"平均绝对预测误差（绝对误差）：{mean_error:.4f}")
+        # 计算整体RMSE和R²
+        rmse = np.sqrt(np.mean((y_true_flow - y_pred_flow) ** 2))
+        ss_res = np.sum((y_true_flow - y_pred_flow) ** 2)
+        ss_tot = np.sum((y_true_flow - np.mean(y_true_flow)) ** 2)
+        r2 = 1 - ss_res / ss_tot if ss_tot != 0 else np.nan
+        print(f"RMSE (Root Mean Square Error): {rmse:.4f}")
+        print(f"R^2 (Coefficient of Determination): {r2:.4f}")
     
     # 为了兼容后续代码，仍然计算全量误差（但会包含异常值）
     error = compute_prediction_error(y_true_flow, y_pred_flow)

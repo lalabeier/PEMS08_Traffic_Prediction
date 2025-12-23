@@ -288,12 +288,51 @@ def normalize(data, mean=None, std=None):
     normalized = (data - mean) / (std + 1e-8)
     return normalized, mean, std
 
-def create_sequences(data, seq_len=12, pred_len=1):
+def add_time_features(data):
+    """
+    向数据添加时间特征（小时、星期几）。
+    假设时间步长为1小时，起始时间为周一00:00。
+    输入数据形状：(nodes, timesteps, features)
+    返回数据形状：(nodes, timesteps, features + 2)
+    """
+    nodes, timesteps, features = data.shape
+    # 创建时间索引（0到timesteps-1）
+    time_idx = np.arange(timesteps)
+    hour = (time_idx % 24) / 23.0  # 归一化到[0,1]
+    day_of_week = ((time_idx // 24) % 7) / 6.0  # 归一化到[0,1]
+    # 广播到所有节点
+    hour_full = np.tile(hour, (nodes, 1)).reshape(nodes, timesteps, 1)
+    day_full = np.tile(day_of_week, (nodes, 1)).reshape(nodes, timesteps, 1)
+    # 拼接特征
+    data_with_time = np.concatenate([data, hour_full, day_full], axis=-1)
+    return data_with_time
+
+def create_sequences(data, seq_len=12, pred_len=1, add_time_features_flag=True, time_features_for_input_only=True):
     """
     创建滑动窗口序列用于时序预测。
     输入数据形状：(nodes, timesteps, features)
     返回X, y形状：(samples, nodes, seq_len, features) 和 (samples, nodes, pred_len, features)
+    如果add_time_features_flag为True，则自动添加时间特征（小时、星期几）作为额外特征。
+    如果time_features_for_input_only为True，则时间特征仅添加到输入X，而不添加到输出y。
+    此时，X的特征数 = 原始特征数 + 2，y的特征数 = 原始特征数。
     """
+    original_features = data.shape[2]
+    if add_time_features_flag:
+        data_with_time = add_time_features(data)  # 形状 (nodes, timesteps, original_features + 2)
+        if time_features_for_input_only:
+            # 对于输入，使用带时间特征的数据；对于输出，使用原始数据（但需要对齐时间步）
+            # 我们需要确保X和y的时间步对齐
+            nodes, timesteps, features_with_time = data_with_time.shape
+            X, y = [], []
+            for i in range(timesteps - seq_len - pred_len + 1):
+                X.append(data_with_time[:, i:i+seq_len, :])
+                y.append(data[:, i+seq_len:i+seq_len+pred_len, :])
+            X = np.array(X)  # (samples, nodes, seq_len, features_with_time)
+            y = np.array(y)  # (samples, nodes, pred_len, original_features)
+            return X, y
+        else:
+            data = data_with_time
+    # 默认情况（不添加时间特征，或时间特征同时添加到X和y）
     nodes, timesteps, features = data.shape
     X, y = [], []
     for i in range(timesteps - seq_len - pred_len + 1):
