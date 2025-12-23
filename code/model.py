@@ -65,14 +65,60 @@ class STGCNBlock(nn.Module):
         out = out + residual
         return out
 
+class SpatialAttention(nn.Module):
+    """空间注意力模块（多头自注意力）"""
+    def __init__(self, channels, nodes, heads=4, dropout=0.1):
+        super().__init__()
+        self.heads = heads
+        self.scale = (channels // heads) ** -0.5
+        self.to_qkv = nn.Linear(channels, channels * 3)
+        self.to_out = nn.Linear(channels, channels)
+        self.dropout = nn.Dropout(dropout)
+        self.nodes = nodes
+        self.channels = channels
+
+    def forward(self, x):
+        """
+        x: (batch, channels, nodes, timesteps)
+        输出：经过注意力加权的特征，形状相同
+        """
+        batch, channels, nodes, timesteps = x.shape
+        # 在时间维度上平均池化，得到节点特征 (batch, channels, nodes)
+        x_pool = x.mean(dim=-1)  # (batch, channels, nodes)
+        x_pool = x_pool.permute(0, 2, 1)  # (batch, nodes, channels)
+        # 计算Q,K,V
+        qkv = self.to_qkv(x_pool).reshape(batch, nodes, 3, self.heads, channels // self.heads)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch, heads, nodes, channels_per_head)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        # 注意力得分
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.dropout(attn)
+        # 加权求和
+        out = (attn @ v).transpose(1, 2).reshape(batch, nodes, channels)
+        out = self.to_out(out)  # (batch, nodes, channels)
+        out = out.permute(0, 2, 1)  # (batch, channels, nodes)
+        out = out.unsqueeze(-1).expand_as(x)  # (batch, channels, nodes, timesteps)
+        return x + out  # 残差连接
+
 class STGCN(nn.Module):
     """完整的STGCN模型"""
-    def __init__(self, num_nodes, in_channels=3, hidden_channels=64, out_channels=1, K=3, num_blocks=2):
+    def __init__(self, num_nodes, in_channels=3, hidden_channels=64, out_channels=1, K=3, num_blocks=2,
+                 use_attention=False, attention_heads=4, attention_dropout=0.1):
         super(STGCN, self).__init__()
+        self.num_nodes = num_nodes
+        self.use_attention = use_attention
         self.blocks = nn.ModuleList()
         self.blocks.append(STGCNBlock(in_channels, hidden_channels, K))
         for _ in range(num_blocks - 1):
             self.blocks.append(STGCNBlock(hidden_channels, hidden_channels, K))
+        # 注意力模块
+        self.attentions = nn.ModuleList()
+        if use_attention:
+            for _ in range(num_blocks):
+                self.attentions.append(SpatialAttention(hidden_channels, num_nodes, attention_heads, attention_dropout))
+        else:
+            self.attentions = nn.ModuleList([nn.Identity() for _ in range(num_blocks)])
         self.final_temp = TemporalConv(hidden_channels, hidden_channels)
         self.output = nn.Conv2d(hidden_channels, out_channels, 1)
 
@@ -81,8 +127,9 @@ class STGCN(nn.Module):
         x: (batch, channels, nodes, timesteps)
         L: 拉普拉斯矩阵 (nodes, nodes)
         """
-        for block in self.blocks:
+        for block, attention in zip(self.blocks, self.attentions):
             x = block(x, L)
+            x = attention(x)
         x = self.final_temp(x)
         x = self.output(x)
         # 取最后一个时间步作为预测（假设 pred_len = 1）

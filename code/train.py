@@ -16,6 +16,52 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from model import STGCN, get_laplacian
 from preprocess import load_raw_data, split_train_test, normalize, create_sequences
 
+
+class WeightedMSELoss(nn.Module):
+    """
+    加权MSE损失，根据流量大小分配不同权重
+    配置参数来自config模块（需导入）
+    """
+    def __init__(self, low_threshold=100.0, high_threshold=500.0,
+                 low_weight=2.0, high_weight=1.5, normal_weight=1.0):
+        super().__init__()
+        self.low_threshold = low_threshold
+        self.high_threshold = high_threshold
+        self.low_weight = low_weight
+        self.high_weight = high_weight
+        self.normal_weight = normal_weight
+        
+    def forward(self, pred, target):
+        # 默认权重为normal_weight
+        weights = torch.full_like(target, self.normal_weight)
+        # 低流量权重
+        low_mask = target < self.low_threshold
+        weights[low_mask] = self.low_weight
+        # 高流量权重
+        high_mask = target > self.high_threshold
+        weights[high_mask] = self.high_weight
+        # 计算加权MSE
+        loss = torch.mean(weights * (pred - target) ** 2)
+        return loss
+
+
+class HuberLoss(nn.Module):
+    """
+    Huber损失，对异常值更鲁棒
+    """
+    def __init__(self, delta=1.0):
+        super().__init__()
+        self.delta = delta
+        
+    def forward(self, pred, target):
+        error = pred - target
+        abs_error = torch.abs(error)
+        quadratic = torch.clamp(abs_error, max=self.delta)
+        linear = abs_error - quadratic
+        loss = 0.5 * quadratic ** 2 + self.delta * linear
+        return torch.mean(loss)
+
+
 def prepare_data(data_dir='../data/PEMS08_raw/', seq_len=12, pred_len=1):
     """准备数据加载器"""
     data = load_raw_data(data_dir)

@@ -48,6 +48,26 @@ HANDLE_MISSING = True
 HANDLE_OUTLIERS = True
 SMOOTH_LOW_FLOW = True
 OUTLIER_METHOD = 'cap'  # 'cap', 'smooth', 'remove'
+OUTLIER_SPATIOTEMPORAL = True  # 是否使用时序空异常检测
+OUTLIER_WINDOW_SIZE = 3  # 时空检测窗口大小
+OUTLIER_N_SIGMA = 3.0  # 异常值sigma阈值
+
+# 损失函数配置
+LOSS = 'MSE'  # 'MSE', 'WeightedMSE', 'Huber'
+USE_WEIGHTED_LOSS = True  # 是否使用加权损失
+LOW_FLOW_THRESHOLD = 100.0  # 低流量阈值
+HIGH_FLOW_THRESHOLD = 500.0  # 高流量阈值
+LOW_FLOW_WEIGHT = 2.0  # 低流量样本权重
+HIGH_FLOW_WEIGHT = 1.5  # 高流量样本权重
+NORMAL_FLOW_WEIGHT = 1.0  # 正常流量样本权重
+
+# 模型增强配置
+USE_ATTENTION = True  # 是否在STGCN中添加注意力模块
+ATTENTION_HEADS = 4  # 注意力头数
+ATTENTION_DROPOUT = 0.1  # 注意力dropout率
+
+# 评估配置
+ERROR_BINS = [0, 100, 300, 500, 1000]  # 误差分区间隔（流量值）
 
 # 模型路径配置
 MODEL_PATH = './results/models/stgcn_model.pth'

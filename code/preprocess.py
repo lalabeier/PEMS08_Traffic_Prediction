@@ -115,6 +115,59 @@ def detect_outliers(data, z_threshold=3.0, iqr_factor=1.5, verbose=True):
     
     return outlier_mask, stats_dict
 
+def detect_spatiotemporal_outliers(data, window_size=3, n_sigma=3.0, verbose=True):
+    """
+    基于时空邻域的异常值检测
+    Args:
+        data: (nodes, timesteps, features)
+        window_size: 时间维度滑动窗口大小（奇数）
+        n_sigma: 标准差倍数阈值
+        verbose: 是否打印详细信息
+    Returns:
+        outlier_mask: 异常值掩码，True表示异常值
+        stats: 统计信息字典
+    """
+    from scipy.ndimage import uniform_filter
+    
+    stats_dict = {
+        'outlier_count': 0,
+        'outlier_percentage': 0.0,
+        'outlier_per_feature': []
+    }
+    
+    outlier_mask = np.zeros_like(data, dtype=bool)
+    
+    for f in range(data.shape[2]):
+        feature_data = data[:, :, f]
+        
+        # 计算局部均值和标准差（仅时间维度滑动窗口）
+        # uniform_filter 用于计算滑动平均
+        local_mean = uniform_filter(feature_data, size=(1, window_size), mode='nearest')
+        local_std = np.sqrt(uniform_filter((feature_data - local_mean)**2,
+                                          size=(1, window_size), mode='nearest'))
+        
+        # 避免除零
+        local_std[local_std < 1e-8] = 1e-8
+        
+        # 计算局部Z-score
+        z_scores = np.abs((feature_data - local_mean) / local_std)
+        feature_mask = z_scores > n_sigma
+        
+        outlier_mask[:, :, f] = feature_mask
+        outlier_count = np.sum(feature_mask)
+        stats_dict['outlier_per_feature'].append(outlier_count)
+    
+    stats_dict['outlier_count'] = np.sum(outlier_mask)
+    stats_dict['outlier_percentage'] = stats_dict['outlier_count'] / data.size * 100
+    
+    if verbose:
+        print(f"时空异常值检测：{stats_dict['outlier_count']} 个 ({stats_dict['outlier_percentage']:.2f}%)")
+        for f in range(data.shape[2]):
+            print(f"  特征 {f}: {stats_dict['outlier_per_feature'][f]} 个异常值")
+    
+    return outlier_mask, stats_dict
+
+
 def handle_outliers(data, outlier_mask, method='cap', verbose=True):
     """
     处理异常值
@@ -211,8 +264,8 @@ def smooth_low_flow(data, flow_threshold=1.0, window_size=3, verbose=True):
     
     return smoothed_data, stats
 
-def load_raw_data(data_dir='../data/PEMS08_raw/', handle_missing=True, handle_outliers_flag=True, 
-                  smooth_low_flow_flag=True, outlier_method='cap', verbose=True):
+def load_raw_data(data_dir='../data/PEMS08_raw/', handle_missing=True, handle_outliers_flag=True,
+                  smooth_low_flow_flag=True, outlier_method='cap', verbose=True, use_spatiotemporal=False):
     """
     加载原始数据并进行数据清洗。
     假设原始数据为.npz文件，包含'data'键，形状为(170, 17856, 3)。
@@ -224,6 +277,7 @@ def load_raw_data(data_dir='../data/PEMS08_raw/', handle_missing=True, handle_ou
         smooth_low_flow_flag: 是否平滑低流量段
         outlier_method: 异常值处理方法 ('cap', 'smooth', 'remove')
         verbose: 是否打印详细信息
+        use_spatiotemporal: 是否使用时空异常值检测（否则使用传统检测）
     """
     data_path = os.path.join(data_dir, 'pems08.npz')
     if not os.path.exists(data_path):
@@ -249,7 +303,12 @@ def load_raw_data(data_dir='../data/PEMS08_raw/', handle_missing=True, handle_ou
     
     # 2. 处理异常值
     if handle_outliers_flag:
-        outlier_mask, outlier_stats = detect_outliers(data, verbose=verbose)
+        if use_spatiotemporal:
+            outlier_mask, outlier_stats = detect_spatiotemporal_outliers(
+                data, window_size=3, n_sigma=3.0, verbose=verbose
+            )
+        else:
+            outlier_mask, outlier_stats = detect_outliers(data, verbose=verbose)
         data = handle_outliers(data, outlier_mask, method=outlier_method, verbose=verbose)
         # 如果使用remove方法，需要再次处理缺失值
         if outlier_method == 'remove' and handle_missing:

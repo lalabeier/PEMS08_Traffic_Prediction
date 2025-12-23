@@ -11,6 +11,8 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import ERROR_BINS
 
 from model import STGCN, get_laplacian
 from preprocess import load_raw_data, split_train_test, normalize, create_sequences
@@ -47,6 +49,115 @@ def compute_prediction_error(y_true, y_pred):
             error[~mask_valid] = 0  # 如果所有真实值都为0，误差设为0
     
     return error
+
+def compute_binned_errors(y_true, y_pred, bins):
+    """
+    根据真实流量值分区间计算误差统计量。
+    
+    参数：
+        y_true, y_pred: 形状 (samples, nodes, timesteps) 或展平后的1D数组
+        bins: 区间边界列表，例如 [0, 100, 300, 500, 1000]
+        
+    返回：
+        results: 列表，每个元素为一个字典，包含区间统计信息
+    """
+    # 展平为一维
+    y_true_flat = y_true.flatten()
+    y_pred_flat = y_pred.flatten()
+    
+    # 确保bins是单调递增的
+    bins = np.array(bins)
+    if not np.all(np.diff(bins) > 0):
+        raise ValueError("bins must be strictly increasing")
+    
+    # 分配样本到区间 (左闭右开区间)
+    # 使用 np.digitize，返回区间索引（1到len(bins)）
+    indices = np.digitize(y_true_flat, bins)
+    # 注意：np.digitize 返回 i 使得 bins[i-1] <= x < bins[i]（如果bins递增）
+    # 对于 x < bins[0] 返回0，对于 x >= bins[-1] 返回 len(bins)
+    # 我们将处理边界情况：将索引0合并到第一个区间，将索引len(bins)合并到最后一个区间
+    # 调整区间索引
+    n_bins = len(bins) - 1  # 区间数量
+    results = []
+    for i in range(n_bins):
+        # 区间 i: bins[i] <= y_true < bins[i+1]
+        mask = (indices == i+1)  # digitize 返回 i+1
+        # 包括小于 bins[0] 的样本（索引0）到第一个区间吗？通常 bins[0] 是最小值，我们可以忽略或合并
+        # 这里我们将忽略小于 bins[0] 的样本（因为 bins[0] 通常为0）
+        # 对于第一个区间，也包含索引0的样本（即 y_true < bins[0]）
+        if i == 0:
+            mask = mask | (indices == 0)
+        
+        y_true_bin = y_true_flat[mask]
+        y_pred_bin = y_pred_flat[mask]
+        count = len(y_true_bin)
+        
+        if count == 0:
+            results.append({
+                'bin': f"[{bins[i]}, {bins[i+1]})",
+                'count': 0,
+                'rmse': np.nan,
+                'mae': np.nan,
+                'mape': np.nan,
+                'r2': np.nan,
+                'mean_true': np.nan,
+                'mean_pred': np.nan
+            })
+            continue
+        
+        # 计算指标
+        rmse = np.sqrt(np.mean((y_true_bin - y_pred_bin) ** 2))
+        mae = np.mean(np.abs(y_true_bin - y_pred_bin))
+        # MAPE（避免除以0）
+        mask_nonzero = y_true_bin != 0
+        if np.any(mask_nonzero):
+            mape = np.mean(np.abs((y_true_bin[mask_nonzero] - y_pred_bin[mask_nonzero]) / y_true_bin[mask_nonzero])) * 100
+        else:
+            mape = np.nan
+        # R²
+        ss_res = np.sum((y_true_bin - y_pred_bin) ** 2)
+        ss_tot = np.sum((y_true_bin - np.mean(y_true_bin)) ** 2)
+        r2 = 1 - ss_res / ss_tot if ss_tot != 0 else np.nan
+        
+        results.append({
+            'bin': f"[{bins[i]}, {bins[i+1]})",
+            'count': count,
+            'rmse': rmse,
+            'mae': mae,
+            'mape': mape,
+            'r2': r2,
+            'mean_true': np.mean(y_true_bin),
+            'mean_pred': np.mean(y_pred_bin)
+        })
+    
+    # 处理最后一个区间外的样本（y_true >= bins[-1]）
+    mask_last = (indices == len(bins))
+    if np.any(mask_last):
+        y_true_bin = y_true_flat[mask_last]
+        y_pred_bin = y_pred_flat[mask_last]
+        count = len(y_true_bin)
+        rmse = np.sqrt(np.mean((y_true_bin - y_pred_bin) ** 2))
+        mae = np.mean(np.abs(y_true_bin - y_pred_bin))
+        mask_nonzero = y_true_bin != 0
+        if np.any(mask_nonzero):
+            mape = np.mean(np.abs((y_true_bin[mask_nonzero] - y_pred_bin[mask_nonzero]) / y_true_bin[mask_nonzero])) * 100
+        else:
+            mape = np.nan
+        ss_res = np.sum((y_true_bin - y_pred_bin) ** 2)
+        ss_tot = np.sum((y_true_bin - np.mean(y_true_bin)) ** 2)
+        r2 = 1 - ss_res / ss_tot if ss_tot != 0 else np.nan
+        results.append({
+            'bin': f"[{bins[-1]}, inf)",
+            'count': count,
+            'rmse': rmse,
+            'mae': mae,
+            'mape': mape,
+            'r2': r2,
+            'mean_true': np.mean(y_true_bin),
+            'mean_pred': np.mean(y_pred_bin)
+        })
+    
+    return results
 
 def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/models/stgcn_model.pth',
                      adj_method='corr', adj_path=None, adj_topk=10, adj_threshold=0.1,
@@ -180,6 +291,17 @@ def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/mode
     
     # 为了兼容后续代码，仍然计算全量误差（但会包含异常值）
     error = compute_prediction_error(y_true_flow, y_pred_flow)
+
+    # 分区间误差统计
+    binned_results = compute_binned_errors(y_true_flow, y_pred_flow, ERROR_BINS)
+    print("\n=== 分区间误差统计 ===")
+    for res in binned_results:
+        if res['count'] > 0:
+            print(f"区间 {res['bin']}: 样本数 {res['count']}, RMSE {res['rmse']:.2f}, MAE {res['mae']:.2f}, MAPE {res['mape']:.2f}%, R² {res['r2']:.4f}")
+            print(f"    平均真实值 {res['mean_true']:.2f}, 平均预测值 {res['mean_pred']:.2f}")
+        else:
+            print(f"区间 {res['bin']}: 无样本")
+    print("=====================\n")
 
     # 保存预测结果（使用项目根目录的路径）
     results_dir = os.path.join(project_root, 'results')
