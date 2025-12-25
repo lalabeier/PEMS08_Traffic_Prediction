@@ -26,7 +26,7 @@ class TemporalConv(nn.Module):
         return F.relu(out)
 
 class SpatialConv(nn.Module):
-    """空间图卷积层（ChebConv）"""
+    """空间图卷积层（ChebConv修正版）"""
     def __init__(self, in_channels, out_channels, K=3):
         super(SpatialConv, self).__init__()
         self.K = K
@@ -37,14 +37,48 @@ class SpatialConv(nn.Module):
         """
         x: (batch, channels, nodes, timesteps)
         L: 拉普拉斯矩阵 (nodes, nodes)
+        实现切比雪夫图卷积：∑_{k=0}^{K-1} θ_k * T_k(L̃) * x
+        其中 L̃ = 2L/λ_max - I，取 λ_max ≈ 2 简化得 L̃ = L - I
         """
         batch, channels, nodes, timesteps = x.shape
-        x = x.permute(0, 2, 1, 3).contiguous()  # (batch, nodes, channels, timesteps)
-        x = x.view(batch * nodes, channels, timesteps)
-        # 正确的图卷积（对k求和，输出out_channels）
-        out = torch.einsum('kio,bct->bot', self.weights, x)
-        out = out.view(batch, nodes, -1, timesteps)  # -1 应为 out_channels
-        out = out.permute(0, 2, 1, 3)  # (batch, out_channels, nodes, timesteps)
+        
+        # 计算缩放拉普拉斯矩阵 L̃ = L - I（假设λ_max=2）
+        I = torch.eye(nodes, device=L.device, dtype=L.dtype)
+        L_tilde = L - I
+        
+        # 将x重塑为 (batch*timesteps, nodes, channels) 便于矩阵乘法
+        x_reshaped = x.permute(0, 3, 2, 1).contiguous()  # (batch, timesteps, nodes, channels)
+        x_reshaped = x_reshaped.view(batch * timesteps, nodes, channels)  # (B, N, C_in)
+        
+        # 切比雪夫多项式递归计算
+        # T0 = x
+        cheb_polys = [x_reshaped]  # 列表存储 T_k(L̃) * x
+        if self.K > 1:
+            # T1 = L̃ * x
+            # 矩阵乘法: (N,N) @ (B,N,C) -> (B,N,C) 通过 einsum
+            T1 = torch.einsum('ij,bjc->bic', L_tilde, x_reshaped)
+            cheb_polys.append(T1)
+        
+        for k in range(2, self.K):
+            # Tk = 2 * L̃ * T_{k-1} - T_{k-2}
+            Tk = 2 * torch.einsum('ij,bjc->bic', L_tilde, cheb_polys[-1]) - cheb_polys[-2]
+            cheb_polys.append(Tk)
+        
+        # 加权求和：对每个k，权重形状 (in_channels, out_channels)
+        # 初始化输出 (B, N, C_out)
+        out = torch.zeros(batch * timesteps, nodes, self.weights.shape[2],
+                         device=x.device, dtype=x.dtype)
+        for k in range(self.K):
+            # cheb_polys[k] 形状 (B, N, C_in)
+            # self.weights[k] 形状 (C_in, C_out)
+            # 计算加权贡献: (B, N, C_in) @ (C_in, C_out) -> (B, N, C_out)
+            contribution = torch.matmul(cheb_polys[k], self.weights[k])
+            out += contribution
+        
+        # 恢复形状为 (batch, channels, nodes, timesteps)
+        out = out.view(batch, timesteps, nodes, -1)  # (batch, timesteps, nodes, C_out)
+        out = out.permute(0, 3, 2, 1)  # (batch, C_out, nodes, timesteps)
+        
         out = out + self.bias.view(1, -1, 1, 1)
         return F.relu(out)
 

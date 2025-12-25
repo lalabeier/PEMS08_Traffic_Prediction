@@ -349,21 +349,28 @@ def normalize(data, mean=None, std=None):
 
 def add_time_features(data):
     """
-    向数据添加时间特征（小时、星期几）。
+    向数据添加周期性时间特征（小时、星期几的正弦/余弦编码）。
     假设时间步长为1小时，起始时间为周一00:00。
     输入数据形状：(nodes, timesteps, features)
-    返回数据形状：(nodes, timesteps, features + 2)
+    返回数据形状：(nodes, timesteps, features + 4)
     """
     nodes, timesteps, features = data.shape
-    # 创建时间索引（0到timesteps-1）
     time_idx = np.arange(timesteps)
-    hour = (time_idx % 24) / 23.0  # 归一化到[0,1]
-    day_of_week = ((time_idx // 24) % 7) / 6.0  # 归一化到[0,1]
+    # 小时编码（24小时周期）
+    hour = time_idx % 24
+    hour_sin = np.sin(2 * np.pi * hour / 24)
+    hour_cos = np.cos(2 * np.pi * hour / 24)
+    # 星期编码（7天周期）
+    day_of_week = (time_idx // 24) % 7
+    day_sin = np.sin(2 * np.pi * day_of_week / 7)
+    day_cos = np.cos(2 * np.pi * day_of_week / 7)
     # 广播到所有节点
-    hour_full = np.tile(hour, (nodes, 1)).reshape(nodes, timesteps, 1)
-    day_full = np.tile(day_of_week, (nodes, 1)).reshape(nodes, timesteps, 1)
+    hour_sin_full = np.tile(hour_sin, (nodes, 1)).reshape(nodes, timesteps, 1)
+    hour_cos_full = np.tile(hour_cos, (nodes, 1)).reshape(nodes, timesteps, 1)
+    day_sin_full = np.tile(day_sin, (nodes, 1)).reshape(nodes, timesteps, 1)
+    day_cos_full = np.tile(day_cos, (nodes, 1)).reshape(nodes, timesteps, 1)
     # 拼接特征
-    data_with_time = np.concatenate([data, hour_full, day_full], axis=-1)
+    data_with_time = np.concatenate([data, hour_sin_full, hour_cos_full, day_sin_full, day_cos_full], axis=-1)
     return data_with_time
 
 def create_sequences(data, seq_len=12, pred_len=1, add_time_features_flag=True, time_features_for_input_only=True):
@@ -373,11 +380,11 @@ def create_sequences(data, seq_len=12, pred_len=1, add_time_features_flag=True, 
     返回X, y形状：(samples, nodes, seq_len, features) 和 (samples, nodes, pred_len, features)
     如果add_time_features_flag为True，则自动添加时间特征（小时、星期几）作为额外特征。
     如果time_features_for_input_only为True，则时间特征仅添加到输入X，而不添加到输出y。
-    此时，X的特征数 = 原始特征数 + 2，y的特征数 = 原始特征数。
+    此时，X的特征数 = 原始特征数 + 4，y的特征数 = 原始特征数。
     """
     original_features = data.shape[2]
     if add_time_features_flag:
-        data_with_time = add_time_features(data)  # 形状 (nodes, timesteps, original_features + 2)
+        data_with_time = add_time_features(data)  # 形状 (nodes, timesteps, original_features + 4)
         if time_features_for_input_only:
             # 对于输入，使用带时间特征的数据；对于输出，使用原始数据（但需要对齐时间步）
             # 我们需要确保X和y的时间步对齐

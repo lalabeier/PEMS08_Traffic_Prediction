@@ -53,7 +53,7 @@ OUTLIER_WINDOW_SIZE = 3  # 时空检测窗口大小
 OUTLIER_N_SIGMA = 3.0  # 异常值sigma阈值
 
 # 损失函数配置
-LOSS = 'MSE'  # 'MSE', 'WeightedMSE', 'Huber'
+LOSS = 'WeightedMSE'  # 'MSE', 'WeightedMSE', 'Huber'
 USE_WEIGHTED_LOSS = True  # 是否使用加权损失
 LOW_FLOW_THRESHOLD = 100.0  # 低流量阈值
 HIGH_FLOW_THRESHOLD = 500.0  # 高流量阈值

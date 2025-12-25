@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from model import STGCN, get_laplacian
 from preprocess import load_raw_data, split_train_test, normalize, create_sequences
+import config
 
 
 class WeightedMSELoss(nn.Module):
@@ -183,7 +184,19 @@ def main():
 
     # 模型
     model = STGCN(num_nodes, in_channels=3, hidden_channels=hidden_channels, out_channels=3, K=K).to(device)
-    criterion = nn.MSELoss()
+    # 根据配置选择损失函数
+    if config.LOSS == 'WeightedMSE' and config.USE_WEIGHTED_LOSS:
+        criterion = WeightedMSELoss(
+            low_threshold=config.LOW_FLOW_THRESHOLD,
+            high_threshold=config.HIGH_FLOW_THRESHOLD,
+            low_weight=config.LOW_FLOW_WEIGHT,
+            high_weight=config.HIGH_FLOW_WEIGHT,
+            normal_weight=config.NORMAL_FLOW_WEIGHT
+        )
+    elif config.LOSS == 'Huber':
+        criterion = HuberLoss(delta=1.0)
+    else:
+        criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     # 训练循环
