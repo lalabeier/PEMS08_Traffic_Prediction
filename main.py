@@ -11,7 +11,7 @@ sys.path.append('./code')
 
 from preprocess import load_raw_data, split_train_test, normalize, create_sequences
 from model import STGCN, get_laplacian
-from train import train_one_epoch, evaluate, plot_curves
+from train import train_one_epoch, evaluate, plot_curves, WeightedMSELoss, HuberLoss
 from evaluate import evaluate_on_test
 from utils import build_corr_adjacency, load_adjacency_from_file
 import torch
@@ -128,13 +128,26 @@ def train_model(X_train, y_train, X_test, y_test, args):
     print(f"输入通道数: {in_channels}, 输出通道数: {out_channels}")
 
     model = STGCN(num_nodes, in_channels=in_channels, hidden_channels=args.hidden_channels, out_channels=out_channels, K=args.K).to(device)
-    criterion = nn.MSELoss()
+    # 根据配置选择损失函数
+    if config.LOSS == 'WeightedMSE' and config.USE_WEIGHTED_LOSS:
+        criterion = WeightedMSELoss(
+            low_threshold=config.LOW_FLOW_THRESHOLD,
+            high_threshold=config.HIGH_FLOW_THRESHOLD,
+            low_weight=config.LOW_FLOW_WEIGHT,
+            high_weight=config.HIGH_FLOW_WEIGHT,
+            normal_weight=config.NORMAL_FLOW_WEIGHT
+        )
+    elif config.LOSS == 'Huber':
+        criterion = HuberLoss(delta=1.0)
+    else:
+        criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     # 添加学习率调度器：验证损失不下降时降低学习率
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    # 使用较小的patience（3个epoch）和绝对阈值1e-4，确保在改善不明显时及时降低学习率
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, threshold=1e-4, threshold_mode='abs')
 
-    # 混合精度缩放器（仅当设备为CUDA时启用）
-    scaler = torch.cuda.amp.GradScaler() if device.type == 'cuda' else None
+    # 混合精度缩放器（仅当设备为CUDA时启用）——暂时禁用以排查NaN问题
+    scaler = None
 
     train_dataset = TensorDataset(X_train, y_train)
     val_dataset = TensorDataset(X_test, y_test)

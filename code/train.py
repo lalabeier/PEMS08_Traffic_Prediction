@@ -104,9 +104,13 @@ def train_one_epoch(model, loader, optimizer, criterion, device, L, focus_on_flo
                     loss = criterion(output[:, 0:1, :, :], y_batch[:, 0:1, :, :])
                 else:
                     loss = criterion(output, y_batch)
+            # 检查损失是否为NaN
+            if torch.isnan(loss):
+                print(f"警告：批次损失为NaN，跳过该批次")
+                continue
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             scaler.step(optimizer)
             scaler.update()
         else:
@@ -115,8 +119,12 @@ def train_one_epoch(model, loader, optimizer, criterion, device, L, focus_on_flo
                 loss = criterion(output[:, 0:1, :, :], y_batch[:, 0:1, :, :])
             else:
                 loss = criterion(output, y_batch)
+            # 检查损失是否为NaN
+            if torch.isnan(loss):
+                print(f"警告：批次损失为NaN，跳过该批次")
+                continue
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             optimizer.step()
         
         total_loss += loss.item() * X_batch.size(0)
