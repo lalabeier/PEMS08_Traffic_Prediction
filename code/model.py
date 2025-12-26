@@ -99,41 +99,50 @@ class STGCNBlock(nn.Module):
         out = out + residual
         return out
 
-class SpatialAttention(nn.Module):
-    """空间注意力模块（多头自注意力）"""
+class SpatioTemporalAttention(nn.Module):
+    """时空多头自注意力模块"""
     def __init__(self, channels, nodes, heads=4, dropout=0.1):
         super().__init__()
-        self.heads = heads
-        self.scale = (channels // heads) ** -0.5
-        self.to_qkv = nn.Linear(channels, channels * 3)
-        self.to_out = nn.Linear(channels, channels)
-        self.dropout = nn.Dropout(dropout)
-        self.nodes = nodes
         self.channels = channels
-
+        self.nodes = nodes
+        self.heads = heads
+        # 使用 PyTorch 内置的 MultiheadAttention
+        self.mha = nn.MultiheadAttention(
+            embed_dim=channels,
+            num_heads=heads,
+            dropout=dropout,
+            batch_first=False  # 我们使用 (seq_len, batch, embed_dim)
+        )
+        self.dropout = nn.Dropout(dropout)
+        # 位置编码（可学习），最大序列长度设为 nodes * 24（假设最多24个时间步）
+        max_len = nodes * 24
+        self.pos_encoding = nn.Parameter(torch.randn(max_len, 1, channels))
+        
     def forward(self, x):
         """
         x: (batch, channels, nodes, timesteps)
         输出：经过注意力加权的特征，形状相同
         """
         batch, channels, nodes, timesteps = x.shape
-        # 在时间维度上平均池化，得到节点特征 (batch, channels, nodes)
-        x_pool = x.mean(dim=-1)  # (batch, channels, nodes)
-        x_pool = x_pool.permute(0, 2, 1)  # (batch, nodes, channels)
-        # 计算Q,K,V
-        qkv = self.to_qkv(x_pool).reshape(batch, nodes, 3, self.heads, channels // self.heads)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, batch, heads, nodes, channels_per_head)
-        q, k, v = qkv[0], qkv[1], qkv[2]
-        # 注意力得分
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.dropout(attn)
-        # 加权求和
-        out = (attn @ v).transpose(1, 2).reshape(batch, nodes, channels)
-        out = self.to_out(out)  # (batch, nodes, channels)
-        out = out.permute(0, 2, 1)  # (batch, channels, nodes)
-        out = out.unsqueeze(-1).expand_as(x)  # (batch, channels, nodes, timesteps)
-        return x + out  # 残差连接
+        # 合并空间和时间维度
+        x_flat = x.permute(3, 0, 2, 1).contiguous()  # (timesteps, batch, nodes, channels)
+        seq_len = timesteps * nodes
+        x_flat = x_flat.view(timesteps * nodes, batch, channels)  # (seq_len, batch, embed_dim)
+        
+        # 添加位置编码（截取到当前序列长度）
+        pos = self.pos_encoding[:seq_len, :, :]  # (seq_len, 1, channels)
+        x_flat = x_flat + pos.expand(-1, batch, -1)
+        
+        # 多头注意力
+        attn_out, _ = self.mha(x_flat, x_flat, x_flat)  # (seq_len, batch, channels)
+        
+        # 恢复形状
+        attn_out = attn_out.view(timesteps, batch, nodes, channels)
+        attn_out = attn_out.permute(1, 3, 2, 0)  # (batch, channels, nodes, timesteps)
+        
+        # 残差连接 + dropout
+        out = x + self.dropout(attn_out)
+        return out
 
 class STGCN(nn.Module):
     """完整的STGCN模型"""
@@ -150,7 +159,7 @@ class STGCN(nn.Module):
         self.attentions = nn.ModuleList()
         if use_attention:
             for _ in range(num_blocks):
-                self.attentions.append(SpatialAttention(hidden_channels, num_nodes, attention_heads, attention_dropout))
+                self.attentions.append(SpatioTemporalAttention(hidden_channels, num_nodes, attention_heads, attention_dropout))
         else:
             self.attentions = nn.ModuleList([nn.Identity() for _ in range(num_blocks)])
         self.final_temp = TemporalConv(hidden_channels, hidden_channels)

@@ -50,6 +50,46 @@ def compute_prediction_error(y_true, y_pred):
     
     return error
 
+def compute_robust_metrics(y_true, y_pred):
+    """
+    计算鲁棒的评估指标。
+    返回字典包含：smape, log_rmse, quantile_losses, mae, rmse, mape
+    """
+    # 对称MAPE (sMAPE)
+    denominator = np.abs(y_true) + np.abs(y_pred) + 1e-8
+    smape = 2.0 * np.mean(np.abs(y_true - y_pred) / denominator) * 100
+
+    # 对数转换RMSE
+    y_true_log = np.log1p(np.maximum(y_true, 0))
+    y_pred_log = np.log1p(np.maximum(y_pred, 0))
+    log_rmse = np.sqrt(np.mean((y_true_log - y_pred_log) ** 2))
+
+    # 分位数损失
+    quantiles = [0.1, 0.5, 0.9]
+    quantile_losses = []
+    for q in quantiles:
+        loss = np.mean(np.maximum(q * (y_true - y_pred), (q - 1) * (y_true - y_pred)))
+        quantile_losses.append(loss)
+
+    # 传统指标
+    mae = np.mean(np.abs(y_true - y_pred))
+    rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
+    # MAPE (仅对非零值)
+    mask = np.abs(y_true) > 1e-8
+    if np.any(mask):
+        mape = np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
+    else:
+        mape = np.nan
+
+    return {
+        'smape': smape,
+        'log_rmse': log_rmse,
+        'quantile_losses': quantile_losses,
+        'mae': mae,
+        'rmse': rmse,
+        'mape': mape
+    }
+
 def compute_binned_errors(y_true, y_pred, bins):
     """
     根据真实流量值分区间计算误差统计量。
@@ -156,6 +196,55 @@ def compute_binned_errors(y_true, y_pred, bins):
             'mean_true': np.mean(y_true_bin),
             'mean_pred': np.mean(y_pred_bin)
         })
+    
+    return results
+
+def evaluate_all_features(y_true_orig, y_pred_orig, feature_names=['flow', 'speed', 'occupancy']):
+    """评估所有特征的预测性能"""
+    results = {}
+    for i, name in enumerate(feature_names):
+        if i >= y_true_orig.shape[1]:
+            break
+        y_true_feat = y_true_orig[:, i, :, :].numpy()  # (samples, nodes, timesteps)
+        y_pred_feat = y_pred_orig[:, i, :, :].numpy()
+        
+        # 计算各特征指标
+        rmse = np.sqrt(np.mean((y_true_feat - y_pred_feat) ** 2))
+        mae = np.mean(np.abs(y_true_feat - y_pred_feat))
+        
+        # 相对误差（仅对非零值）
+        mask = np.abs(y_true_feat) > 1.0
+        if np.any(mask):
+            mape = np.mean(np.abs((y_true_feat[mask] - y_pred_feat[mask]) / y_true_feat[mask])) * 100
+        else:
+            mape = np.nan
+        
+        # 相关性
+        corr = np.corrcoef(y_true_feat.flatten(), y_pred_feat.flatten())[0, 1]
+        
+        results[name] = {
+            'rmse': rmse,
+            'mae': mae,
+            'mape': mape,
+            'correlation': corr
+        }
+    
+    # 计算特征间的一致性指标
+    if len(feature_names) > 1:
+        # 例如：流量与速度的关系是否在预测中保持
+        true_flow_speed_corr = np.corrcoef(
+            y_true_orig[:, 0, :, :].flatten(),
+            y_true_orig[:, 1, :, :].flatten()
+        )[0, 1]
+        pred_flow_speed_corr = np.corrcoef(
+            y_pred_orig[:, 0, :, :].flatten(),
+            y_pred_orig[:, 1, :, :].flatten()
+        )[0, 1]
+        results['cross_feature_consistency'] = {
+            'true_correlation': true_flow_speed_corr,
+            'pred_correlation': pred_flow_speed_corr,
+            'correlation_diff': abs(true_flow_speed_corr - pred_flow_speed_corr)
+        }
     
     return results
 
@@ -291,6 +380,31 @@ def evaluate_on_test(data_dir='../data/PEMS08_raw/', model_path='../results/mode
     
     # 为了兼容后续代码，仍然计算全量误差（但会包含异常值）
     error = compute_prediction_error(y_true_flow, y_pred_flow)
+
+    # 鲁棒指标评估
+    robust_metrics = compute_robust_metrics(y_true_flow, y_pred_flow)
+    print("\n=== 鲁棒评估指标 ===")
+    print(f"sMAPE (对称平均绝对百分比误差): {robust_metrics['smape']:.2f}%")
+    print(f"对数RMSE (Log RMSE): {robust_metrics['log_rmse']:.4f}")
+    print(f"分位数损失 (0.1, 0.5, 0.9): {robust_metrics['quantile_losses']}")
+    print(f"MAE (平均绝对误差): {robust_metrics['mae']:.4f}")
+    print(f"RMSE (均方根误差): {robust_metrics['rmse']:.4f}")
+    print(f"MAPE (平均绝对百分比误差): {robust_metrics['mape']:.2f}%")
+    print("=====================\n")
+
+    # 多特征评估
+    print("\n=== 多特征评估 ===")
+    feature_names = ['flow', 'speed', 'occupancy']
+    feature_results = evaluate_all_features(y_true_orig, y_pred_orig, feature_names)
+    for name, metrics in feature_results.items():
+        if name == 'cross_feature_consistency':
+            print(f"特征间一致性:")
+            print(f"  真实流量-速度相关性: {metrics['true_correlation']:.4f}")
+            print(f"  预测流量-速度相关性: {metrics['pred_correlation']:.4f}")
+            print(f"  相关性差异: {metrics['correlation_diff']:.4f}")
+        else:
+            print(f"特征 {name}: RMSE {metrics['rmse']:.4f}, MAE {metrics['mae']:.4f}, MAPE {metrics['mape']:.2f}%, 相关性 {metrics['correlation']:.4f}")
+    print("=====================\n")
 
     # 分区间误差统计
     binned_results = compute_binned_errors(y_true_flow, y_pred_flow, ERROR_BINS)
