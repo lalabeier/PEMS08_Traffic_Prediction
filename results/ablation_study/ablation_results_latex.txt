@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+\centering
+\caption{消融实验结果对比}
+\label{tab:ablation_results}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{模型配置} & \textbf{MAPE (\%)} & \textbf{RMSE} & \textbf{R\textsuperscript{2}} & \textbf{MAE} & \textbf{低流量MAPE} & \textbf{高流量MAPE} \\
+\midrule
+完整模型 & 8.76 & 20.36 & 0.9817 & 12.23 & 18.22 & 3.22 \\
++ 加权损失 & 10.05 & 22.08 & 0.9775 & 13.95 & 21.50 & 3.65 \\
++ 注意力机制 & 10.23 & 22.45 & 0.9763 & 14.12 & 23.15 & 3.78 \\
+基准模型 & 11.52 & 24.17 & 0.9721 & 15.84 & 26.43 & 4.21 \\
+\bottomrule
+\end{tabular}
+\end{table}

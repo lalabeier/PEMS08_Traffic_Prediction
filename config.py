@@ -69,5 +69,19 @@ ATTENTION_DROPOUT = 0.1  # 注意力dropout率
 # 评估配置
 ERROR_BINS = [0, 100, 300, 500, 1000]  # 误差分区间隔（流量值）
 
+# config.py 新增部分
+# 消融实验配置
+ABLATION_STUDY = True  # 是否进行消融实验
+# 消融实验模式
+ABLATION_MODES = {
+    'baseline': {'use_attention': False, 'use_weighted_loss': False},
+    'attention_only': {'use_attention': True, 'use_weighted_loss': False},
+    'weighted_loss_only': {'use_attention': False, 'use_weighted_loss': True},
+    'full_model': {'use_attention': True, 'use_weighted_loss': True}
+}
+
+# 当前实验模式（通过命令行参数指定）
+CURRENT_ABLATION_MODE = 'full_model'  # 默认完整模型
+
 # 模型路径配置
 MODEL_PATH = './results/models/stgcn_model.pth'

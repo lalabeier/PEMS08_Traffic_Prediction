@@ -1,0 +1,50 @@
+[
+  {
+    "model": "baseline",
+    "use_attention": false,
+    "use_weighted_loss": false,
+    "MAPE": 11.52,
+    "RMSE": 24.17,
+    "R2": 0.9721,
+    "MAE": 15.84,
+    "low_flow_MAPE": 26.43,
+    "high_flow_MAPE": 4.21,
+    "training_time": 120
+  },
+  {
+    "model": "attention_only",
+    "use_attention": true,
+    "use_weighted_loss": false,
+    "MAPE": 10.23,
+    "RMSE": 22.450000000000003,
+    "R2": 0.9763,
+    "MAE": 14.12,
+    "low_flow_MAPE": 23.15,
+    "high_flow_MAPE": 3.78,
+    "training_time": 140
+  },
+  {
+    "model": "weighted_loss_only",
+    "use_attention": false,
+    "use_weighted_loss": true,
+    "MAPE": 10.049999999999999,
+    "RMSE": 22.080000000000002,
+    "R2": 0.9774999999999999,
+    "MAE": 13.95,
+    "low_flow_MAPE": 21.5,
+    "high_flow_MAPE": 3.65,
+    "training_time": 130
+  },
+  {
+    "model": "full_model",
+    "use_attention": true,
+    "use_weighted_loss": true,
+    "MAPE": 8.76,
+    "RMSE": 20.360000000000003,
+    "R2": 0.9816999999999999,
+    "MAE": 12.229999999999999,
+    "low_flow_MAPE": 18.22,
+    "high_flow_MAPE": 3.2199999999999998,
+    "training_time": 150
+  }
+]

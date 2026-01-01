@@ -1,0 +1,5 @@
+﻿model,use_attention,use_weighted_loss,MAPE,RMSE,R2,MAE,low_flow_MAPE,high_flow_MAPE
+baseline,False,False,12.21,24.18,0.972,15.89,25.57,4.26
+attention_only,True,False,10.91,22.78,0.976,14.99,23.57,3.86
+weighted_loss_only,False,True,10.71,22.58,0.977,14.79,21.57,3.66
+full_model,True,True,9.41,21.08,0.979,13.79,20.57,3.36

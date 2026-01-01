@@ -72,9 +72,6 @@ python main.py --mode all
 2. **训练模型**：
    ```bash
    python main.py --mode train --epochs 50 --batch_size 32
-
-   默认（相关性构图）：  python main.py --mode train --epochs 50 --batch_size 32 --adj_method corr  --adj_topk 10 --adj_threshold 0.1
-
    ```
 
 3. **评估模型**：

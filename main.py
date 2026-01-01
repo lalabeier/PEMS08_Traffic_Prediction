@@ -108,7 +108,37 @@ def build_adjacency(args, num_nodes):
                                       use_abs=True)
     return torch.FloatTensor(adj_np)
 
-def train_model(X_train, y_train, X_test, y_test, args):
+def train_model(X_train, y_train, X_test, y_test, args, ablation_mode='full_model'):
+    
+    """训练模型，支持消融实验"""
+    print(f"开始训练 - 消融实验模式: {ablation_mode}")
+    
+    # 获取当前消融实验配置
+    ablation_config = config.ABLATION_MODES[ablation_mode]
+    
+    # 构建模型时传递消融配置
+    model = STGCN(
+        num_nodes=num_nodes,
+        in_channels=in_channels,
+        hidden_channels=args.hidden_channels,
+        out_channels=out_channels,
+        K=args.K,
+        use_attention=ablation_config['use_attention'],  # 控制注意力模块
+        # ... 其他参数
+    ).to(device)
+    
+    # 根据配置选择损失函数
+    if ablation_config['use_weighted_loss'] and config.USE_WEIGHTED_LOSS:
+        criterion = WeightedMSELoss(
+            low_threshold=config.LOW_FLOW_THRESHOLD,
+            high_threshold=config.HIGH_FLOW_THRESHOLD,
+            low_weight=config.LOW_FLOW_WEIGHT,
+            high_weight=config.HIGH_FLOW_WEIGHT,
+            normal_weight=config.NORMAL_FLOW_WEIGHT
+        )
+    else:
+        criterion = nn.MSELoss()
+
     """训练模型"""
     print("开始训练...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

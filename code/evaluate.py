@@ -213,7 +213,7 @@ def evaluate_all_features(y_true_orig, y_pred_orig, feature_names=['flow', 'spee
         mae = np.mean(np.abs(y_true_feat - y_pred_feat))
         
         # 相对误差（仅对非零值）
-        mask = np.abs(y_true_feat) > 1.0
+        mask = np.abs(y_true_feat) > 0.1  # 使用阈值避免除零
         if np.any(mask):
             mape = np.mean(np.abs((y_true_feat[mask] - y_pred_feat[mask]) / y_true_feat[mask])) * 100
         else:
