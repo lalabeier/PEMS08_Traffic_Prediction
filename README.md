@@ -73,9 +73,8 @@ python main.py --mode all
    ```bash
    python main.py --mode train --epochs 50 --batch_size 32
 
-   默认（相关性构图）：无需额外文件  python main.py --mode train --epochs 50 --batch_size 32 --adj_method corr  --adj_topk 10 --adj_threshold 0.1
+   默认（相关性构图）：  python main.py --mode train --epochs 50 --batch_size 32 --adj_method corr  --adj_topk 10 --adj_threshold 0.1
 
-   使用外部邻接矩阵（npy/csv）:  python main.py --mode train --epochs 50 --batch_size 32 --adj_method file --adj_path ./data/PEMS08_raw/adjacency.npy
    ```
 
 3. **评估模型**：
@@ -103,12 +102,6 @@ python main.py --mode all
 - `figures/predictions_10sensors.png`：前10个传感器的真实值与预测值对比图。
 - `predictions.csv`：详细的预测结果表格。
 
-## 扩展与改进
-
-- 尝试不同的图结构（如基于距离的邻接矩阵）。
-- 调整超参数（序列长度、隐藏层维度等）。
-- 引入注意力机制（如ASTGCN）。
-- 使用更复杂的时序模型（如Transformer）。
 
 ## 注意事项
 
@@ -119,20 +112,3 @@ python main.py --mode all
 ## 许可证
 
 MIT License
-
-
-实施优先级建议
-高优先级：
-
-修复图卷积实现（最影响模型性能）
-启用加权损失函数（立即改善训练效果）
-优化时间特征编码（提升周期性建模）
-中优先级：
-
-强化注意力机制
-改进评估指标鲁棒性
-扩展多特征评估
-低优先级：
-
-残差连接一致性优化
-数据增强实施
